@@ -45,7 +45,7 @@ async fn handle_socket5_client(mut inbound: TcpStream) -> Result<(), Box<dyn Err
         0x03 => {
             let len = buffer[4] as usize;
             let domain = String::from_utf8(buffer[5..len + 5].to_vec())?;
-            let port = u16::from_be_bytes(buffer[len..len + 2].try_into().unwrap());
+            let port = u16::from_be_bytes(buffer[len + 5..len + 7].try_into().unwrap());
             format!("{}:{}", domain, port)
                 .to_socket_addrs()?
                 .find(|x| x.is_ipv4())
