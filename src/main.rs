@@ -60,10 +60,44 @@ async fn handle_socket5_client(mut inbound: TcpStream) -> Result<(), Box<dyn Err
             inbound
                 .write_all(&[5, 8, 0, 1, 127, 0, 0, 1, 0, 80])
                 .await?;
+            inbound.shutdown().await?;
             return Err("the type of address is not unsupported".into());
         }
     };
     println!("{}", addr);
+    // establish connection and return data
+    let outbound = match TcpStream::connect(addr).await {
+        Ok(res) => res,
+        Err(e) => {
+            // fail to cnnect target address
+            // 05 means Connection refused
+            inbound
+                .write_all(&[5, 5, 0, 1, 127, 0, 0, 1, 0, 80])
+                .await?;
+            inbound.shutdown().await?;
+            return Err(e.into());
+        }
+    };
+    // the second 00 means that connection succeeded.
+    // 127,0,0,1:80 is also meaningless
+    inbound
+        .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 80])
+        .await?;
+    // here we have finished the establishment of socks5 proxy.
+    copy_io(inbound, outbound).await?;
+    Ok(())
+}
+
+async fn copy_io(inbound: TcpStream, outbound: TcpStream) -> Result<(), Box<dyn Error>> {
+    let (mut inbound_reader, mut inbound_writer) = tokio::io::split(inbound);
+    let (mut outbound_reader, mut outbound_writer) = tokio::io::split(outbound);
+    let rt1 = tokio::spawn(async move {
+        let _ = tokio::io::copy(&mut inbound_reader, &mut outbound_writer).await;
+    });
+    let rt2 = tokio::spawn(async move {
+        let _ = tokio::io::copy(&mut outbound_reader, &mut inbound_writer).await;
+    });
+    let _ = tokio::join!(rt1, rt2);
     Ok(())
 }
 
@@ -104,15 +138,7 @@ async fn handle_https(
     stream.flush().await?;
     // from here on, the real https data is exchanging between two streams
     let outbound = TcpStream::connect(addr.first().unwrap().as_str()).await?;
-    let (mut inbound_reader, mut inbound_writer) = tokio::io::split(stream);
-    let (mut outbound_reader, mut outbound_writer) = tokio::io::split(outbound);
-    let rt1 = tokio::spawn(async move {
-        let _ = tokio::io::copy(&mut inbound_reader, &mut outbound_writer).await;
-    });
-    let rt2 = tokio::spawn(async move {
-        let _ = tokio::io::copy(&mut outbound_reader, &mut inbound_writer).await;
-    });
-    let _ = tokio::join!(rt1, rt2);
+    copy_io(stream, outbound).await?;
     Ok(())
 }
 
@@ -152,15 +178,7 @@ async fn handle_http(
     let mut outbound = TcpStream::connect(format!("{}:{}", addr, port)).await?;
     outbound.write_all(&buffer[..start_pos]).await?;
     outbound.write_all(&buffer[end_pos..len]).await?;
-    let (mut inbound_reader, mut inbound_writer) = tokio::io::split(stream);
-    let (mut outbound_reader, mut outbound_writer) = tokio::io::split(outbound);
-    let rt1 = tokio::spawn(async move {
-        let _ = tokio::io::copy(&mut inbound_reader, &mut outbound_writer).await;
-    });
-    let rt2 = tokio::spawn(async move {
-        let _ = tokio::io::copy(&mut outbound_reader, &mut inbound_writer).await;
-    });
-    let _ = tokio::join!(rt1, rt2);
+    copy_io(stream, outbound).await?;
     Ok(())
 }
 
