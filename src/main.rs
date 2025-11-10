@@ -1,11 +1,70 @@
-use std::error::Error;
+use std::{
+    error::Error,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 #[tokio::main]
 async fn main() {
-    start_server().await.unwrap();
+    // start_server().await.unwrap();
+    start_socket5_sever().await.unwrap();
+}
+
+async fn start_socket5_sever() -> Result<(), Box<dyn Error>> {
+    let listen = TcpListener::bind("127.0.0.1:7090").await?;
+    loop {
+        let (stream, addr) = listen.accept().await?;
+        println!("{}", addr);
+        tokio::spawn(async move {
+            handle_socket5_client(stream).await.unwrap();
+        });
+    }
+}
+
+async fn handle_socket5_client(mut inbound: TcpStream) -> Result<(), Box<dyn Error>> {
+    let mut buffer = [0; 1024];
+    let len = inbound.read(&mut buffer).await?;
+    println!("{:?}", buffer[..len].to_vec());
+    // client returns unathenticated respone
+    inbound.write_all(&[5, 0]).await?;
+    // because we choose unathentication, this step is skepped,
+    // client will send request data.
+    let mut buffer = [0; 1024];
+    let len = inbound.read(&mut buffer).await?;
+    println!("{:?}", buffer[..len].to_vec());
+    // parse address
+    let addr = match buffer[3] {
+        // IPv4
+        0x01 => {
+            let host = u32::from_be_bytes(buffer[4..8].try_into().unwrap());
+            let port = u16::from_be_bytes(buffer[8..10].try_into().unwrap());
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from(host), port))
+        }
+        0x03 => {
+            let len = buffer[4] as usize;
+            let domain = String::from_utf8(buffer[5..len + 5].to_vec())?;
+            let port = u16::from_be_bytes(buffer[len..len + 2].try_into().unwrap());
+            format!("{}:{}", domain, port)
+                .to_socket_addrs()?
+                .find(|x| x.is_ipv4())
+                .ok_or("fail to parse IPv4 address")?
+        }
+        _ => {
+            // here we respone a unsupported address type
+            // 05 means version
+            // 08 means Address type not supported
+            // 00 means ipv4
+            // 127,0,0,1:80 is meaningless
+            inbound
+                .write_all(&[5, 8, 0, 1, 127, 0, 0, 1, 0, 80])
+                .await?;
+            return Err("the type of address is not unsupported".into());
+        }
+    };
+    println!("{}", addr);
+    Ok(())
 }
 
 async fn start_server() -> Result<(), Box<dyn Error>> {
