@@ -13,7 +13,7 @@ pub fn gen_ca() -> Result<(), Box<dyn Error>> {
     params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
     params.not_before = OffsetDateTime::from_unix_timestamp(current_time()?)?;
     // our certigicate is only valid for 1 year
-    params.not_after = OffsetDateTime::from_unix_timestamp(current_time()? + 365 + 24 * 3600)?;
+    params.not_after = OffsetDateTime::from_unix_timestamp(current_time()? + 365 * 24 * 3600)?;
     // we just write one certigicate information
     params
         .distinguished_name
