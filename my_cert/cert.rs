@@ -1,7 +1,6 @@
 use rcgen::KeyUsagePurpose::{CrlSign, KeyCertSign};
 use rcgen::{
-    BasicConstraints, CertificateParams, DnType, DnValue, ExtendedKeyUsagePurpose, Ia5String, IsCa,
-    KeyUsagePurpose, PrintableString, SanType,
+    BasicConstraints, CertificateParams, DnType, DnValue, Ia5String, IsCa, PrintableString, SanType,
 };
 use std::error::Error;
 use std::str::FromStr;
@@ -14,27 +13,31 @@ pub fn current_time() -> Result<i64, Box<dyn Error>> {
 
 pub fn gen_ca() -> Result<(), Box<dyn Error>> {
     let mut params = CertificateParams::default();
-    params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     params.not_before = OffsetDateTime::from_unix_timestamp(current_time()?)?;
-    // our certigicate is only valid for 1 year
+    //这里我们的根证书有效时长只有一年
     params.not_after = OffsetDateTime::from_unix_timestamp(current_time()? + 365 * 24 * 3600)?;
-    // we just write one certigicate information
-    params
-        .distinguished_name
-        .push(rcgen::DnType::CountryName, "China");
-    // the certigicate is used for certificate insurance
-    params.key_usages.push(rcgen::KeyUsagePurpose::KeyCertSign);
-    params.key_usages.push(rcgen::KeyUsagePurpose::CrlSign);
+    //这里的证书信息至少要提供国家名和常用名
+    params.distinguished_name.push(
+        DnType::CountryName,
+        DnValue::PrintableString(PrintableString::try_from("CN")?),
+    );
+    params.distinguished_name.push(
+        DnType::CommonName,
+        DnValue::Utf8String("Proxy-CA".to_string()),
+    );
+    //这里的证书用途我们写证书签发
+    params.key_usages.push(KeyCertSign);
+    params.key_usages.push(CrlSign);
     let key_size = rcgen::RsaKeySize::_4096;
     let key_pair = rcgen::KeyPair::generate_rsa_for(&rcgen::PKCS_RSA_SHA256, key_size)?;
-    // here we get pem certificate
+    //这里我们就拿到了pem类型证书
     let pem = params.self_signed(&key_pair)?;
-    // here we get der certificate
+    //这里我们就拿到了der类型证书
     let der = pem.der();
     std::fs::write("sca.pem", pem.pem().as_bytes())?;
     std::fs::write("sca.der", der.to_vec().as_slice())?;
-    // we only export key in PRM format,
-    // while DER fomart certificates are mainly used in Windows
+    //这里我们只导出pem类型的key，der类型的证书主要用于window的安装
     std::fs::write("sca.key", key_pair.serialize_pem().as_bytes())?;
     Ok(())
 }
