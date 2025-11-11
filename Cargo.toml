@@ -5,6 +5,15 @@ edition = "2024"
 
 [dependencies]
 regex = "1.12.2"
+rcgen = { version = "0.14.5", features = [
+  "crypto",
+  "x509-parser",
+  "aws_lc_rs",
+] }
+time = { version = "0.3.44", features = ["macros", "local-offset"] }
+rustls-pki-types = "1.13.0"
+rustls-pemfile = "2.2.0"
+webpki-roots = "1.0.4"
 
 [dependencies.tokio]
 version = "1.48.0"

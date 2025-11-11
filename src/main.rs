@@ -2,6 +2,8 @@ use std::{
     error::Error,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
 };
+#[path = "../my_cert/mod.rs"]
+mod my_cert;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
