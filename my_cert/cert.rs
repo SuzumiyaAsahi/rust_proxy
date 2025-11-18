@@ -13,7 +13,7 @@ pub fn current_time() -> Result<i64, Box<dyn Error>> {
 
 pub fn gen_ca() -> Result<(), Box<dyn Error>> {
     let mut params = CertificateParams::default();
-    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    params.is_ca = IsCa::NoCa;
     params.not_before = OffsetDateTime::from_unix_timestamp(current_time()?)?;
     //这里我们的根证书有效时长只有一年
     params.not_after = OffsetDateTime::from_unix_timestamp(current_time()? + 365 * 24 * 3600)?;
