@@ -19,7 +19,7 @@ use tokio::{
 #[tokio::main]
 async fn main() {
     // start_server().await.unwrap();
-    start_socket5_sever().await.unwrap();
+    start_server().await.unwrap();
 }
 
 async fn start_socket5_sever() -> Result<(), Box<dyn Error>> {
