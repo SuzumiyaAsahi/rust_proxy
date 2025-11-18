@@ -55,7 +55,7 @@ pub fn gen_cert_for_sni(
         .push(SanType::DnsName(Ia5String::from_str(
             sni.as_ref().to_string().as_str(),
         )?));
-    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    params.is_ca = IsCa::NoCa;
     params.not_before = OffsetDateTime::from_unix_timestamp(current_time()?)?;
     //这里我们的根证书有效时长只有一年
     params.not_after = OffsetDateTime::from_unix_timestamp(current_time()? + 365 * 24 * 3600)?;
