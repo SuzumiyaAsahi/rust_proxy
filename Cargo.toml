@@ -14,6 +14,8 @@ time = { version = "0.3.44", features = ["macros", "local-offset"] }
 rustls-pki-types = "1.13.0"
 rustls-pemfile = "2.2.0"
 webpki-roots = "1.0.4"
+tokio-rustls = "0.26.4"
+rustls = "0.23.35"
 
 [dependencies.tokio]
 version = "1.48.0"

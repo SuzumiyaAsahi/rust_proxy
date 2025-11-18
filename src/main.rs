@@ -1,13 +1,21 @@
+use rustls::{ClientConfig, RootCertStore};
+use rustls_pemfile::Item;
+use rustls_pki_types::{DnsName, PrivateKeyDer, ServerName};
 use std::{
     error::Error,
+    io::BufReader,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
+    sync::Arc,
 };
+use tokio_rustls::{TlsAcceptor, TlsConnector, rustls::ServerConfig};
 #[path = "../my_cert/mod.rs"]
 mod my_cert;
+use my_cert::cert;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+
 #[tokio::main]
 async fn main() {
     // start_server().await.unwrap();
@@ -90,19 +98,6 @@ async fn handle_socket5_client(mut inbound: TcpStream) -> Result<(), Box<dyn Err
     Ok(())
 }
 
-async fn copy_io(inbound: TcpStream, outbound: TcpStream) -> Result<(), Box<dyn Error>> {
-    let (mut inbound_reader, mut inbound_writer) = tokio::io::split(inbound);
-    let (mut outbound_reader, mut outbound_writer) = tokio::io::split(outbound);
-    let rt1 = tokio::spawn(async move {
-        let _ = tokio::io::copy(&mut inbound_reader, &mut outbound_writer).await;
-    });
-    let rt2 = tokio::spawn(async move {
-        let _ = tokio::io::copy(&mut outbound_reader, &mut inbound_writer).await;
-    });
-    let _ = tokio::join!(rt1, rt2);
-    Ok(())
-}
-
 async fn start_server() -> Result<(), Box<dyn Error>> {
     let listen = TcpListener::bind("0.0.0.0:7090").await?;
     loop {
@@ -137,10 +132,41 @@ async fn handle_https(
         return Err("Fail to get real address".into());
     }
     stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await?;
-    stream.flush().await?;
     // from here on, the real https data is exchanging between two streams
-    let outbound = TcpStream::connect(addr.first().unwrap().as_str()).await?;
-    copy_io(stream, outbound).await?;
+    let sni = addr[0].split(":").next().unwrap();
+    let acceptor = gen_acceptor_for_sni(sni)?;
+    let inbound = acceptor.accept(stream).await?;
+    let mut root_ca = RootCertStore::empty();
+    root_ca.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let client_config = ClientConfig::builder()
+        .with_root_certificates(root_ca)
+        .with_no_client_auth();
+    let outbound = TcpStream::connect(&addr[0]).await?;
+    let connector = TlsConnector::from(Arc::new(client_config));
+    println!("{}", sni);
+    let server_name = ServerName::DnsName(DnsName::try_from(sni.to_string())?);
+    let outbound = connector.connect(server_name, outbound).await?;
+    // //这里我们就实现了HTTPS解密，但是我们的根证书还没安装
+    // //sudo cp sca.pem /etc/pki/ca-trust/source/anchors/
+    // //sudo update-ca-trust
+    copy_io(inbound, outbound).await?;
+    Ok(())
+}
+
+async fn copy_io<I, O>(inbound: I, outbound: O) -> Result<(), Box<dyn Error>>
+where
+    I: AsyncReadExt + AsyncWriteExt + Send + Unpin + 'static,
+    O: AsyncReadExt + AsyncWriteExt + Send + Unpin + 'static,
+{
+    let (mut inbound_reader, mut inbound_writer) = tokio::io::split(inbound);
+    let (mut outbound_reader, mut outbound_writer) = tokio::io::split(outbound);
+    let rt1 = tokio::spawn(async move {
+        let _ = tokio::io::copy(&mut inbound_reader, &mut outbound_writer).await;
+    });
+    let rt2 = tokio::spawn(async move {
+        let _ = tokio::io::copy(&mut outbound_reader, &mut inbound_writer).await;
+    });
+    let _ = tokio::join!(rt1, rt2);
     Ok(())
 }
 
@@ -198,4 +224,35 @@ fn regex_find(rex: &str, context: &str) -> Result<Vec<String>, Box<dyn Error>> {
         res.extend(r);
     }
     Ok(res)
+}
+
+//这里需要实现一个TlsAcceptor才能解密
+fn gen_acceptor_for_sni(sni: impl AsRef<str>) -> Result<TlsAcceptor, Box<dyn Error>> {
+    //这里先要生成证书
+    let (pem, key) = cert::gen_cert_for_sni(sni.as_ref(), "sca.pem", "sca.key")?;
+    let ca_bs = pem.into_bytes();
+    let key_bs = key.into_bytes();
+    let mut reader = BufReader::new(ca_bs.as_slice());
+    let item = rustls_pemfile::read_one(&mut reader)
+        .transpose()
+        .ok_or("读取证书失败")??;
+    let sni_cert = match item {
+        Item::X509Certificate(cert) => cert,
+        _ => return Err("不支持的证书".into()),
+    };
+    let mut reader = BufReader::new(key_bs.as_slice());
+    let item = rustls_pemfile::read_one(&mut reader)
+        .transpose()
+        .ok_or("读取证书密钥失败")??;
+    let sni_key = match item {
+        Item::Pkcs1Key(key) => PrivateKeyDer::Pkcs1(key),
+        Item::Pkcs8Key(key) => PrivateKeyDer::Pkcs8(key),
+        Item::Sec1Key(key) => PrivateKeyDer::Sec1(key),
+        _ => return Err("不支持的证书密钥类型".into()),
+    };
+    let config = ServerConfig::builder_with_protocol_versions(&rustls::ALL_VERSIONS)
+        .with_no_client_auth()
+        .with_single_cert(vec![sni_cert], sni_key)?;
+    let acceptor = TlsAcceptor::from(Arc::new(config));
+    Ok(acceptor)
 }
